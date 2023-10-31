@@ -1,4 +1,5 @@
 import time
+import numpy as np
 import pickle
 from state import State
 from policy import Policy
@@ -22,6 +23,7 @@ class Environment:
         self.time_per_tick = 1.0 / tick_rate
         self.target_framerate = target_framerate
         self.delta_time = 1.0 / target_framerate
+        self.prev_positions = self.state.player_positions.copy()
 
     def save_history(
         self, state_path="state_history.pkl", action_path="action_history.pkl"
@@ -58,10 +60,28 @@ class Environment:
 
             last_time = current_time
 
+    def get_actions(self, delta_time):
+        actions = Actions(self.num_players, action_dim=2)
+        ball_speed_reward = np.log(np.abs(self.state.ball_velocity).mean() + 1)
+        for player_id in range(2):
+            ball_distance = np.linalg.norm(
+                self.state.ball_position - self.state.player_positions[player_id]
+            )
+            ball_proximity_reward = (
+                1 if ball_distance < 0.2 else (0.5 if ball_distance < 0.4 else 0)
+            )
+            position_change_reward = np.abs(
+                self.state.player_positions - self.prev_positions
+            ).mean()
+            reward = ball_speed_reward - 10 * ball_distance
+            actions.set_action(
+                player_id, self.policies[player_id].get_action(self.state, reward)
+            )
+        return actions
+
     def tick(self, delta_time):
-        actions = Actions(self.num_players, action_dim=5)
-        for i in range(self.num_players):
-            actions.set_action(i, self.policies[i].get_action(self.state))
+        actions = self.get_actions(delta_time)
+        self.prev_positions = self.state.player_positions.copy()
         self.state.update(actions, delta_time)
         self.state_history.append(self.state.to_numpy())
         self.action_history.append(actions.to_numpy())

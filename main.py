@@ -1,16 +1,28 @@
 from environment import Environment
-from policy import RandomPolicy, KeyboardControlPolicy
-from render import PygameRender, RenderMP4
+from policy import RandomPolicy, FollowPolicy, KeyboardControlPolicy, LinearPolicy
+from render import PygameRender
+from render_mp4 import RenderMP4
 import pygame
 import time
+from q_learning import QPolicy, DeepQLearning
 
 if __name__ == "__main__":
     NUM_PLAYERS = 2
-    ACTION_SPACE_DIM = 5
+    ACTION_SPACE_DIM = 2
+    STATE_DIM = 5 + NUM_PLAYERS * 4
 
-    pygame_renderer = PygameRender(resolution=(800, 800))
+    pygame_renderer = PygameRender(resolution=(1280, 720))
 
-    policies = [KeyboardControlPolicy(ACTION_SPACE_DIM), RandomPolicy(ACTION_SPACE_DIM)]
+    model = DeepQLearning(STATE_DIM, hidden_dim=16)
+    # player1 = FollowPolicy(action_space_dim=ACTION_SPACE_DIM, player_num=0)
+    # player1 = KeyboardControlPolicy(ACTION_SPACE_DIM)
+    player1 = QPolicy(
+        ACTION_SPACE_DIM, STATE_DIM, player_num=0, verbose=True, model=model
+    )
+    player2 = QPolicy(
+        ACTION_SPACE_DIM, STATE_DIM, player_num=1, verbose=False, model=model
+    )
+    policies = [player1, player2]
     env = Environment(num_players=NUM_PLAYERS, policies=policies, tick_rate=60)
 
     start_time = time.time()

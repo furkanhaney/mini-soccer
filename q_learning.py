@@ -18,19 +18,24 @@ ACTIONS = [
     np.array([-1, 0]),
     np.array([0, -1]),
     np.array([0, 1]),
+    np.array([0, 0]),
 ]
 
 
 class DeepQLearning:
     def __init__(self, state_dim, hidden_dim):
         self.policy = nn.Sequential(
-            nn.Linear(state_dim, hidden_dim, bias=True),
-            nn.ELU(),
+            # nn.Linear(state_dim, hidden_dim, bias=True),
+            # nn.LeakyReLU(0.2),
             # nn.LayerNorm(hidden_dim),
-            nn.Linear(hidden_dim, len(ACTIONS), bias=True),
-            # nn.Tanh(),
+            # nn.Linear(hidden_dim, len(ACTIONS), bias=True),
+            # nn.ReLU(),
+            nn.Linear(state_dim, 2, bias=True),
+            nn.ReLU6(),
+            nn.Linear(2, len(ACTIONS))
+            # nn.Sigmoid(),
         )
-        self.optimizer = opt.Adam(self.policy.parameters(), lr=1e-3)
+        self.optimizer = opt.Adam(self.policy.parameters(), lr=1e-5, betas=(0.5, 0.999))
         self.criterion = nn.MSELoss()
         self.history_ = deque(maxlen=5000)
         self.avg_loss = 0
@@ -70,6 +75,11 @@ class DeepQLearning:
         # Compute target Q-values: immediate rewards + (discount factor * max Q-value for next state)
         discount_factor = 0.9
         targets = rewards + discount_factor * max_next_q_values
+        # rewards_normalized = (rewards - rewards.mean()) / (
+        #     rewards.max() - rewards.min()
+        # )
+        # targets = 10 * (rewards - rewards.mean())
+        # targets = (targets - targets.mean()) / (targets.max() - targets.min())
         # targets = rewards
 
         # Select the Q-values for the taken actions
@@ -84,14 +94,14 @@ class DeepQLearning:
         if self.avg_loss == 0:
             self.avg_loss = loss.item()
         else:
-            self.avg_loss = loss.item() * 0.05 + self.avg_loss * 0.95
+            self.avg_loss = loss.item() * 0.1 + self.avg_loss * 0.9
 
     def append_history(self, state, action, reward):
         self.history_.append((torch.Tensor(state), action, reward))
         if self.avg_reward == 0:
             self.avg_reward = reward
         else:
-            self.avg_reward = reward * 0.05 + self.avg_reward * 0.95
+            self.avg_reward = reward * 0.1 + self.avg_reward * 0.9
 
 
 class QPolicy(Policy):
@@ -116,7 +126,6 @@ class QPolicy(Policy):
         self.last_action = None
         self.last_state = None
         self.last_reward = 0
-        self.started_exploring = False
         self.explore_action = None
         if verbose:
             self.pbar = tqdm()
@@ -124,41 +133,36 @@ class QPolicy(Policy):
 
     def get_action(self, state: State, reward_prev: float) -> np.ndarray:
         q_values = self.model.get_q_values(state, self.player_num)
-        if self.started_exploring is None:
-            # Exploit
-            _, action_idx = torch.max(q_values, dim=0)
-            action_idx = int(action_idx.item())
-            if np.random.uniform(0, 1) < 0.01:
-                self.started_exploring = time.time()
-                self.random_a = None
+        # Exploit
+        if np.random.uniform(0, 1) < 0:
+            # _, action_idx = torch.max(q_values, dim=0)
+            # action_idx = int(action_idx.item())
+            probs = np.ones(len(ACTIONS)) / len(ACTIONS)
+            action_idx = np.random.choice(range(len(ACTIONS)))
         else:
             # Explore
-            if self.explore_action is None:
-                random_a = np.random.choice(len(ACTIONS))
-                self.explore_duration = random_a
-                action_idx = random_a
-            else:
-                action_idx = self.explore_action
-            self.explore_duration = time.time() - self.started_exploring
-            if self.explore_duration > 2:
-                self.started_exploring = None
-                self.explore_duration = 0
+            temperature = 3.0
+            probs = torch.softmax(q_values * temperature, dim=0).numpy()
+            probs = probs / probs.sum()
+            # assert probs.sum() == 1, probs.sum()
+            action_idx = np.random.choice(range(len(ACTIONS)), p=probs)
         action = ACTIONS[action_idx]
 
         explore_action = (
             ACTIONS[self.explore_action] if self.explore_action is not None else "-"
         )
         summary = (
-            f"reward: {self.model.avg_reward:0.3f} loss: {100*self.model.avg_loss:0.3f} explore: { explore_action} q:"
-            + ", ".join(["{:.2f}".format(q) for q in q_values.numpy()])
+            f"reward: {self.model.avg_reward:0.2f} loss: {self.model.avg_loss:0.2f} "
+            + "logp: {:.2f}".format(np.log(probs[action_idx]))
+            # + ", ".join(
+            #     [f"{ACTIONS[i]}:{q_values[i].item():.2f}" for i in range(len(ACTIONS))]
+            # )
         )
         if self.verbose:
             self.pbar.set_postfix_str(summary)
             self.pbar.update()
         if self.last_action is not None and self.last_state is not None:
-            self.model.append_history(
-                self.last_state, self.last_action, reward_prev - self.model.avg_reward
-            )
+            self.model.append_history(self.last_state, self.last_action, reward_prev)
         self.last_action = action_idx
         self.last_state = state.to_numpy(self.player_num).copy()
         self.last_reward = reward_prev

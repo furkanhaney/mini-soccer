@@ -62,7 +62,7 @@ class Environment:
 
     def get_actions(self, delta_time):
         actions = Actions(self.num_players, action_dim=2)
-        ball_speed_reward = np.log(np.abs(self.state.ball_velocity).mean() + 1)
+        ball_speed = np.linalg.norm(self.state.ball_velocity)
         for player_id in range(2):
             ball_distance = np.linalg.norm(
                 self.state.ball_position - self.state.player_positions[player_id]
@@ -73,7 +73,8 @@ class Environment:
             position_change_reward = np.abs(
                 self.state.player_positions - self.prev_positions
             ).mean()
-            reward = ball_speed_reward - 10 * ball_distance
+            reward = np.log(ball_speed + 1)
+            # reward += np.log(ball_distance + 1) * 0.1
             actions.set_action(
                 player_id, self.policies[player_id].get_action(self.state, reward)
             )
